@@ -7,13 +7,13 @@ from sqlalchemy import text
 from app.database import engine, SessionLocal
 from app.models import Base, FaixaOperadora, OperadoraRN1, OperadoraSTFC
 
-# URLs dos arquivos
-BASE_URL = "https://techsuper.com.br/baseportabilidade/"
+# URLs dos arquivos (GitHub raw)
+# Arquivos pré-convertidos de MySQL para PostgreSQL
+BASE_URL = "https://raw.githubusercontent.com/conexaoalisson/portabilidade/main/sql_postgres/"
 FILES = {
     "operadoras_rn1": "operadoras_rn1.sql",
     "operadoras_stfc": "operadoras_stfc.sql",
-    "faixa_operadora": "faixa_operadora.sql",
-    "export_full": "export_full_mysql.csv.gz"
+    "faixa_operadora": "faixa_operadora.sql"
 }
 
 class ImportadorPortabilidade:
