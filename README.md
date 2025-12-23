@@ -40,13 +40,25 @@ docker-compose up -d
 ## 🌐 Endpoints
 
 ### GET `/`
-Informações básicas da API
+Informações básicas da API e lista de endpoints disponíveis
 
 ### GET `/health`
-Status de saúde da aplicação e banco de dados
+Status de saúde da aplicação, conexão com banco de dados e contagem de tabelas
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "tables_count": 3,
+  "ssh": "enabled",
+  "ssh_port": 2222,
+  "api_port": 8000
+}
+```
 
 ### POST `/consulta`
-Consulta portabilidade de um telefone
+Consulta portabilidade de um telefone na base de dados
 
 **Body:**
 ```json
@@ -59,16 +71,134 @@ Consulta portabilidade de um telefone
 ```json
 {
   "telefone": "11987654321",
-  "operadora": "TIM",
-  "operadora_original": "VIVO",
+  "operadora": "TIM S/A",
+  "sigla_operadora": "TIM",
   "portado": true,
   "ddd": "11",
-  "prefixo": "9876"
+  "prefixo": "9876",
+  "numero": "54321",
+  "estado": "SP",
+  "tipo_numero": "M"
+}
+```
+
+### GET `/stats`
+Retorna estatísticas da base de dados
+
+**Response:**
+```json
+{
+  "operadoras_rn1": 450,
+  "operadoras_stfc": 4200,
+  "faixa_operadora": 121000,
+  "total_registros": 125650
+}
+```
+
+### POST `/import`
+Importa dados de portabilidade do servidor público
+
+**Body:**
+```json
+{
+  "test_mode": false
+}
+```
+
+**Parâmetros:**
+- `test_mode` (boolean): Se `true`, importa apenas amostra para teste. Se `false`, importa base completa.
+
+**Response:**
+```json
+{
+  "status": "started",
+  "test_mode": false,
+  "message": "Importação iniciada. Use GET /import/status para acompanhar progresso."
+}
+```
+
+### GET `/import/status`
+Retorna status da importação em andamento
+
+**Response:**
+```json
+{
+  "running": true,
+  "last_run": "completed",
+  "last_status": "success",
+  "message": "Importação concluída com sucesso..."
 }
 ```
 
 ### GET `/info`
-Informações de configuração
+Informações de configuração do sistema
+
+## 🔄 Importação Automática
+
+### Primeira Inicialização
+
+Quando a VM subir pela primeira vez, você pode importar a base de dados de duas formas:
+
+#### 1. Via API (Recomendado)
+
+**Teste com amostra:**
+```bash
+curl -X POST http://localhost:8000/import \
+  -H "Content-Type: application/json" \
+  -d '{"test_mode": true}'
+```
+
+**Importação completa:**
+```bash
+curl -X POST http://localhost:8000/import \
+  -H "Content-Type: application/json" \
+  -d '{"test_mode": false}'
+```
+
+**Acompanhar progresso:**
+```bash
+curl http://localhost:8000/import/status
+```
+
+#### 2. Via Script Python
+
+**Teste:**
+```bash
+python -m app.import_data --test
+```
+
+**Importação completa:**
+```bash
+python -m app.import_data
+```
+
+### Processo de Importação
+
+O script de importação executa automaticamente:
+
+1. ✅ **Download** dos arquivos SQL do servidor público
+2. ✅ **Validação UTF-8** para evitar caracteres estranhos
+3. ✅ **Criação de tabelas** com índices otimizados
+4. ✅ **Importação de dados** em 3 etapas:
+   - Operadoras RN1 (450 registros)
+   - Operadoras STFC (4.200 registros)
+   - Faixas de operadora (121.000 registros)
+5. ✅ **Validação de integridade** dos dados
+6. ✅ **Criação de índices** para consultas rápidas
+7. ✅ **Teste de consulta** para verificar funcionamento
+
+### Índices Criados
+
+Para otimizar consultas de portabilidade, os seguintes índices são criados automaticamente:
+
+- `idx_ddd_prefixo_faixa` - Índice composto para consulta rápida por DDD + Prefixo + Faixa
+- `idx_sigla_operadora` - Consulta por sigla da operadora
+- `idx_ddd` - Consulta por DDD
+- `idx_prefixo` - Consulta por prefixo
+- `idx_estado` - Consulta por estado
+- `idx_rn1_prefixo` - Prefixo RN1 único
+- `idx_eot` - EOT único
+- `idx_spid` - SPID único
 
 ## 🔐 Acesso SSH
 
