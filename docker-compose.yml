@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: portabilidade_app
+    ports:
+      - "8000:8000"
+      - "2222:22"
+    environment:
+      - DATABASE_URL=postgresql://portabilidade:portabilidade123@db:5432/portabilidade
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=portabilidade
+      - POSTGRES_PASSWORD=portabilidade123
+      - POSTGRES_DB=portabilidade
+    depends_on:
+      - db
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - portabilidade_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: portabilidade_db
+    environment:
+      - POSTGRES_USER=portabilidade
+      - POSTGRES_PASSWORD=portabilidade123
+      - POSTGRES_DB=portabilidade
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data:/data
+    restart: unless-stopped
+    networks:
+      - portabilidade_network
+
+volumes:
+  postgres_data:
+
+networks:
+  portabilidade_network:
+    driver: bridge
