@@ -120,6 +120,33 @@ class ImportadorPortabilidade:
 
             sql_content = '\n'.join(filtered_lines)
 
+            # Remover CREATE TABLE (models já criaram as tabelas)
+            self.log(f"  Removendo comandos CREATE TABLE...")
+            lines = sql_content.split('\n')
+            filtered_lines = []
+            skip_create = False
+
+            for line in lines:
+                # Detectar início de CREATE TABLE
+                if line.strip().startswith('CREATE TABLE'):
+                    skip_create = True
+                    continue
+
+                # Detectar fim de CREATE TABLE (primeira linha após CREATE que não contém  `, varchar, int, text, etc)
+                if skip_create:
+                    if line.strip().startswith(('INSERT', '--', '')):
+                        skip_create = False
+                    else:
+                        continue
+
+                if not skip_create:
+                    filtered_lines.append(line)
+
+            sql_content = '\n'.join(filtered_lines)
+
+            # Remover COMMIT (vamos usar commit do SQLAlchemy)
+            sql_content = sql_content.replace('COMMIT;', '')
+
             # Limpar caracteres \r que podem causar problemas
             sql_content = sql_content.replace('\r', '')
 
