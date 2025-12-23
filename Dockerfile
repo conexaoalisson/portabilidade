@@ -1,36 +1,72 @@
 FROM python:3.11-slim
 
-# Instalar dependências do sistema incluindo SSH
+# Configurar timezone
+ENV TZ=America/Sao_Paulo
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Variáveis de ambiente PostgreSQL
+ENV POSTGRES_USER=portabilidade \
+    POSTGRES_PASSWORD=portabilidade123 \
+    POSTGRES_DB=portabilidade \
+    PGDATA=/var/lib/postgresql/data
+
+# Instalar PostgreSQL, SSH e dependências
 RUN apt-get update && apt-get install -y \
-    openssh-server \
+    postgresql \
+    postgresql-contrib \
     postgresql-client \
     gcc \
+    python3-dev \
+    libpq-dev \
+    supervisor \
+    openssh-server \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Configurar PostgreSQL
+RUN mkdir -p /var/lib/postgresql/data && \
+    chown -R postgres:postgres /var/lib/postgresql && \
+    chmod 700 /var/lib/postgresql/data
+
+# Inicializar banco de dados PostgreSQL
+USER postgres
+RUN /usr/lib/postgresql/*/bin/initdb -D /var/lib/postgresql/data && \
+    echo "host all all 0.0.0.0/0 md5" >> /var/lib/postgresql/data/pg_hba.conf && \
+    echo "listen_addresses='*'" >> /var/lib/postgresql/data/postgresql.conf && \
+    echo "timezone='America/Sao_Paulo'" >> /var/lib/postgresql/data/postgresql.conf
+
+USER root
+
 # Configurar SSH
-RUN mkdir /var/run/sshd
-RUN echo 'root:portabilidade2025' | chpasswd
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+RUN mkdir -p /var/run/sshd && \
+    mkdir -p /root/.ssh && \
+    chmod 700 /root/.ssh && \
+    ssh-keygen -A && \
+    sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    echo "root:portabilidade2025" | chpasswd
 
-# SSH login fix
-RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
-
-# Criar diretório da aplicação
+# Diretório de trabalho
 WORKDIR /app
 
 # Copiar requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar aplicação
+# Copiar código da aplicação
 COPY app/ ./app/
 
-# Expor portas
-EXPOSE 22 8000
+# Criar diretórios
+RUN mkdir -p /app/data /app/logs
 
-# Script de inicialização
+# Copiar scripts de inicialização
 COPY start.sh /start.sh
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 RUN chmod +x /start.sh
 
+# Expor portas
+EXPOSE 8000 5432 2222
+
+# Comando de inicialização
 CMD ["/start.sh"]
