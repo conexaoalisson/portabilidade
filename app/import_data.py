@@ -79,73 +79,9 @@ class ImportadorPortabilidade:
         self.log(f"Importando {os.path.basename(filepath)}...")
 
         try:
-            # Ler arquivo SQL
+            # Ler arquivo SQL (já convertido para PostgreSQL)
             with open(filepath, 'r', encoding='utf-8') as f:
                 sql_content = f.read()
-
-            # CONVERTER MySQL para PostgreSQL
-            self.log(f"  Convertendo sintaxe MySQL → PostgreSQL...")
-
-            # Remover backticks (MySQL) - PostgreSQL não usa
-            sql_content = sql_content.replace('`', '')
-
-            # Remover comandos específicos do MySQL
-            sql_content = sql_content.replace('ENGINE=InnoDB', '')
-            sql_content = sql_content.replace('DEFAULT CHARSET=utf8mb4', '')
-            sql_content = sql_content.replace('COLLATE=utf8mb4_0900_ai_ci', '')
-            sql_content = sql_content.replace('COLLATE utf8mb4_0900_ai_ci', '')
-
-            # Remover comandos de configuração do MySQL
-            lines_to_remove = [
-                'SET SQL_MODE',
-                'START TRANSACTION',
-                'SET time_zone',
-                '/*!40101',
-                '/*!40000',
-                '/*!50003',
-                'SET @OLD_',
-                'SET @@'
-            ]
-
-            lines = sql_content.split('\n')
-            filtered_lines = []
-            for line in lines:
-                should_skip = False
-                for pattern in lines_to_remove:
-                    if pattern in line:
-                        should_skip = True
-                        break
-                if not should_skip:
-                    filtered_lines.append(line)
-
-            sql_content = '\n'.join(filtered_lines)
-
-            # Remover CREATE TABLE (models já criaram as tabelas)
-            self.log(f"  Removendo comandos CREATE TABLE...")
-            lines = sql_content.split('\n')
-            filtered_lines = []
-            skip_create = False
-
-            for line in lines:
-                # Detectar início de CREATE TABLE
-                if line.strip().startswith('CREATE TABLE'):
-                    skip_create = True
-                    continue
-
-                # Detectar fim de CREATE TABLE (primeira linha após CREATE que não contém  `, varchar, int, text, etc)
-                if skip_create:
-                    if line.strip().startswith(('INSERT', '--', '')):
-                        skip_create = False
-                    else:
-                        continue
-
-                if not skip_create:
-                    filtered_lines.append(line)
-
-            sql_content = '\n'.join(filtered_lines)
-
-            # Remover COMMIT (vamos usar commit do SQLAlchemy)
-            sql_content = sql_content.replace('COMMIT;', '')
 
             # Limpar caracteres \r que podem causar problemas
             sql_content = sql_content.replace('\r', '')
