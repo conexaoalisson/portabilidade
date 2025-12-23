@@ -37,7 +37,7 @@ class OperadoraSTFC(Base):
     __tablename__ = "operadoras_stfc"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    eot = Column(String(10), unique=True, index=True)  # EOT único
+    eot = Column(String(10), index=True)  # EOT (permite duplicatas nos dados de origem)
     nome_fantasia = Column(String(150))
     razao_social = Column(String(200))
     csp = Column(String(10))
