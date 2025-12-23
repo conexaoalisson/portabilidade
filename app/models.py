@@ -56,4 +56,4 @@ class OperadoraSTFC(Base):
     regiao = Column(String(10))
     concessao = Column(String(5))
     rn1 = Column(String(10), index=True)
-    spid = Column(String(10), unique=True, index=True)  # SPID único
+    spid = Column(String(10), index=True)  # SPID (permite duplicatas nos dados de origem)
