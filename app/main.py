@@ -49,6 +49,10 @@ class StatsResponse(BaseModel):
     faixa_operadora: int
     total_registros: int
 
+class RebootRequest(BaseModel):
+    confirm: bool = False
+    delay: int = 5  # segundos de delay antes do reboot
+
 # Estado da importação
 import_status = {
     "running": False,
@@ -69,7 +73,8 @@ async def root():
             "consulta": "POST /consulta - Consultar portabilidade",
             "stats": "GET /stats - Estatísticas da base",
             "import": "POST /import - Importar base de dados",
-            "import_status": "GET /import/status - Status da importação"
+            "import_status": "GET /import/status - Status da importação",
+            "reboot": "POST /reboot - Reiniciar sistema (requer confirmação)"
         }
     }
 
@@ -269,6 +274,65 @@ async def info():
         "ssh_port": 2222,
         "api_port": 8000,
         "base_url": "https://techsuper.com.br/baseportabilidade/"
+    }
+
+def executar_reboot(delay: int):
+    """Executa reboot após delay especificado"""
+    import time
+    import os
+
+    try:
+        time.sleep(delay)
+        # Tentar reboot via systemctl (mais seguro)
+        result = subprocess.run(
+            ["systemctl", "reboot"],
+            capture_output=True,
+            text=True
+        )
+
+        # Se falhar, tentar comando reboot direto
+        if result.returncode != 0:
+            subprocess.run(["reboot"], check=True)
+
+    except Exception as e:
+        # Último recurso: reboot via /sbin/reboot
+        try:
+            subprocess.run(["/sbin/reboot"], check=True)
+        except:
+            pass
+
+@app.post("/reboot")
+async def reboot_system(request: RebootRequest, background_tasks: BackgroundTasks):
+    """
+    Reinicia o sistema (container/VM)
+
+    ATENÇÃO: Isto irá desligar o sistema em poucos segundos!
+
+    - confirm: Deve ser true para confirmar o reboot
+    - delay: Segundos de espera antes do reboot (padrão: 5s)
+    """
+
+    if not request.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Reboot não confirmado. Envie {\"confirm\": true} para confirmar."
+        )
+
+    # Validar delay
+    if request.delay < 0 or request.delay > 60:
+        raise HTTPException(
+            status_code=400,
+            detail="Delay deve estar entre 0 e 60 segundos"
+        )
+
+    # Executar reboot em background
+    background_tasks.add_task(executar_reboot, request.delay)
+
+    return {
+        "status": "reboot_scheduled",
+        "message": f"Sistema será reiniciado em {request.delay} segundos",
+        "delay": request.delay,
+        "warning": "A API ficará offline durante o reinício"
     }
 
 if __name__ == "__main__":

@@ -133,6 +133,57 @@ Retorna status da importação em andamento
 ### GET `/info`
 Informações de configuração do sistema
 
+### POST `/reboot`
+Reinicia o sistema (container/VM)
+
+**ATENÇÃO:** Este endpoint reinicia o sistema! Use com cuidado.
+
+**Body:**
+```json
+{
+  "confirm": true,
+  "delay": 5
+}
+```
+
+**Parâmetros:**
+- `confirm` (boolean, obrigatório): Deve ser `true` para confirmar o reboot
+- `delay` (integer, opcional): Segundos de espera antes do reboot (0-60, padrão: 5)
+
+**Response:**
+```json
+{
+  "status": "reboot_scheduled",
+  "message": "Sistema será reiniciado em 5 segundos",
+  "delay": 5,
+  "warning": "A API ficará offline durante o reinício"
+}
+```
+
+**Exemplos de uso:**
+
+```bash
+# Reboot com delay padrão (5s)
+curl -X POST https://portabilidade.i.vsip.com.br/reboot \
+  -H "Content-Type: application/json" \
+  -d '{"confirm": true}'
+
+# Reboot imediato
+curl -X POST https://portabilidade.i.vsip.com.br/reboot \
+  -H "Content-Type: application/json" \
+  -d '{"confirm": true, "delay": 0}'
+
+# Reboot com 30s de delay
+curl -X POST https://portabilidade.i.vsip.com.br/reboot \
+  -H "Content-Type: application/json" \
+  -d '{"confirm": true, "delay": 30}'
+```
+
+**Segurança:**
+- Requer confirmação explícita (`confirm: true`)
+- Delay máximo de 60 segundos
+- Tenta múltiplos métodos de reboot (systemctl, reboot, /sbin/reboot)
+
 ## 🔄 Importação Automática
 
 ### Primeira Inicialização
