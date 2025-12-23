@@ -18,16 +18,19 @@ def convert_mysql_to_postgres(mysql_file, postgres_file):
     # 1. Remover backticks
     content = content.replace('`', '')
 
-    # 2. Remover ENGINE, CHARSET, COLLATE
+    # 2. Converter escape MySQL (\') para PostgreSQL ('')
+    content = content.replace("\\'", "''")
+
+    # 3. Remover ENGINE, CHARSET, COLLATE
     content = content.replace(' ENGINE=InnoDB', '')
     content = content.replace(' DEFAULT CHARSET=utf8mb4', '')
     content = content.replace(' COLLATE=utf8mb4_0900_ai_ci', '')
     content = content.replace(' COLLATE utf8mb4_0900_ai_ci', '')
 
-    # 3. Remover caracteres \r
+    # 4. Remover caracteres \r
     content = content.replace('\r', '')
 
-    # 4. Filtrar linhas com comandos MySQL
+    # 5. Filtrar linhas com comandos MySQL
     lines_to_remove_patterns = [
         r'^SET SQL_MODE',
         r'^START TRANSACTION',
@@ -79,11 +82,11 @@ def convert_mysql_to_postgres(mysql_file, postgres_file):
 
         filtered_lines.append(line)
 
-    # 5. Remover COMMIT no final
+    # 6. Remover COMMIT no final
     content = '\n'.join(filtered_lines)
     content = content.replace('COMMIT;', '')
 
-    # 6. Limpar espaços no final
+    # 7. Limpar espaços no final
     content = content.strip() + '\n'
 
     # Salvar arquivo convertido
