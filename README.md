@@ -160,6 +160,15 @@ curl -X POST http://localhost:8000/import \
 curl http://localhost:8000/import/status
 ```
 
+**Monitoramento automático (script):**
+```bash
+# Consulta rápida
+./check_import.sh https://portabilidade.i.vsip.com.br
+
+# Monitoramento em tempo real (atualiza a cada 5s)
+./monitor_import.sh https://portabilidade.i.vsip.com.br
+```
+
 #### 2. Via Script Python
 
 **Teste:**
