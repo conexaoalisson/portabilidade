@@ -17,7 +17,8 @@ source /app/.credentials 2>/dev/null || true
 
 # Variáveis
 SQL_DIR="/app/sql_postgres"
-BASE_URL="https://techsuper.com.br/baseportabilidade"
+# URLs corretas do GitHub (fonte oficial)
+BASE_URL="https://raw.githubusercontent.com/conexaoalisson/portabilidade/main/sql_postgres"
 DB_HOST="${POSTGRES_HOST:-localhost}"
 DB_PORT="${POSTGRES_PORT:-5432}"
 DB_USER="${POSTGRES_USER}"
@@ -46,7 +47,7 @@ download_with_axel() {
     local max_retries=3
     local retry=0
 
-    # URLs corretas (sem .gz)
+    # URLs do GitHub já incluem .sql
     local url="${BASE_URL}/${filename}.sql"
     local output_file="$SQL_DIR/${filename}.sql"
 
