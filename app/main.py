@@ -8,7 +8,8 @@ import subprocess
 import sys
 import psutil
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from sqlalchemy import text
 
 from app.database import SessionLocal, engine
@@ -354,11 +355,16 @@ def get_historico_status() -> Dict[str, Any]:
 
         # Verificar se processo está rodando
         import_running = False
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        import_pid = None
+        start_time = None
+
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
             try:
                 cmdline = ' '.join(proc.info['cmdline'] or [])
                 if 'import_chunks_smart.py' in cmdline or 'import_historico_auto.sh' in cmdline:
                     import_running = True
+                    import_pid = proc.info['pid']
+                    start_time = proc.info['create_time']
                     break
             except:
                 pass
@@ -373,11 +379,66 @@ def get_historico_status() -> Dict[str, Any]:
                 'current_chunk': len(chunks) - len([f for f in chunks if os.path.exists(os.path.join(temp_dir, f))])
             }
 
+        # Obter último count de 30 segundos atrás para calcular velocidade
+        speed = 0
+        try:
+            # Criar tabela temporária se não existir
+            session.execute(text("""
+                CREATE TABLE IF NOT EXISTS import_stats (
+                    id SERIAL PRIMARY KEY,
+                    record_count BIGINT,
+                    timestamp TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            session.commit()
+
+            # Salvar contagem atual
+            session.execute(text("""
+                INSERT INTO import_stats (record_count) VALUES (:count)
+            """), {"count": current_count})
+            session.commit()
+
+            # Obter contagem de 30 segundos atrás
+            result = session.execute(text("""
+                SELECT record_count, EXTRACT(EPOCH FROM (NOW() - timestamp)) as seconds_ago
+                FROM import_stats
+                WHERE timestamp > NOW() - INTERVAL '60 seconds'
+                ORDER BY timestamp ASC
+                LIMIT 1
+            """))
+            old_data = result.fetchone()
+
+            if old_data and old_data[1] > 0:
+                records_diff = current_count - old_data[0]
+                time_diff = old_data[1]
+                speed = int(records_diff / time_diff) if time_diff > 0 else 0
+
+            # Limpar registros antigos
+            session.execute(text("""
+                DELETE FROM import_stats
+                WHERE timestamp < NOW() - INTERVAL '5 minutes'
+            """))
+            session.commit()
+
+        except:
+            pass
+
         session.close()
 
         # Calcular progresso
         TOTAL_EXPECTED = 51618684
         progress = (current_count / TOTAL_EXPECTED) * 100 if TOTAL_EXPECTED > 0 else 0
+
+        # Calcular tempo estimado
+        eta_seconds = 0
+        if speed > 0:
+            remaining = TOTAL_EXPECTED - current_count
+            eta_seconds = remaining / speed
+
+        # Tempo decorrido
+        elapsed_seconds = 0
+        if start_time:
+            elapsed_seconds = time.time() - start_time
 
         return {
             'running': import_running,
@@ -385,7 +446,10 @@ def get_historico_status() -> Dict[str, Any]:
             'total_expected': TOTAL_EXPECTED,
             'progress_percent': round(progress, 2),
             'chunks_info': chunks_info,
-            'completed': current_count >= TOTAL_EXPECTED
+            'completed': current_count >= TOTAL_EXPECTED,
+            'speed': speed,
+            'eta_seconds': int(eta_seconds),
+            'elapsed_seconds': int(elapsed_seconds)
         }
 
     except Exception as e:
@@ -393,7 +457,10 @@ def get_historico_status() -> Dict[str, Any]:
             'error': str(e),
             'running': False,
             'current_records': 0,
-            'progress_percent': 0
+            'progress_percent': 0,
+            'speed': 0,
+            'eta_seconds': 0,
+            'elapsed_seconds': 0
         }
 
 @app.post("/import/historico")
@@ -600,11 +667,40 @@ async def import_historico_progress():
                     <div class="stat-value">{status['total_expected']:,}</div>
                     <div class="stat-label">Total Esperado</div>
                 </div>
+                {'<div class="stat">' if status['running'] else ''}
+                    {'<div class="stat-value">' + f"{status['speed']:,}" + '/s</div>' if status.get('speed', 0) > 0 else '<div class="stat-value">Calculando...</div>' if status['running'] else ''}
+                    {'<div class="stat-label">Velocidade</div>' if status['running'] else ''}
+                {'</div>' if status['running'] else ''}
+                {'<div class="stat">' if status['running'] else ''}
+                    {'<div class="stat-value">' + (str(timedelta(seconds=status['eta_seconds'])).split('.')[0] if status.get('eta_seconds', 0) > 0 else 'Calculando...') + '</div>' if status['running'] else ''}
+                    {'<div class="stat-label">Tempo Restante</div>' if status['running'] else ''}
+                {'</div>' if status['running'] else ''}
             </div>
 
             <div class="refresh-info">
                 Página atualiza automaticamente a cada 5 segundos
             </div>
+
+            {f'''
+            <div style="margin-top: 24px;">
+                <button id="startImport" onclick="startImport()" style="
+                    width: 100%;
+                    padding: 16px;
+                    background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                    🚀 Iniciar Importação de 51M Registros
+                </button>
+                <div id="message" style="margin-top: 16px; text-align: center; font-size: 14px;"></div>
+            </div>
+            ''' if not status['running'] and not status['completed'] else ''}
         </div>
 
         <script>
@@ -612,6 +708,50 @@ async def import_historico_progress():
             setTimeout(() => {{
                 location.reload();
             }}, 5000);
+
+            // Função para iniciar importação
+            async function startImport() {{
+                const button = document.getElementById('startImport');
+                const message = document.getElementById('message');
+
+                button.disabled = true;
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
+                button.innerHTML = '⏳ Iniciando importação...';
+
+                try {{
+                    const response = await fetch('/import/historico', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }}
+                    }});
+
+                    if (response.ok) {{
+                        const data = await response.json();
+                        message.style.color = '#22c55e';
+                        message.innerHTML = '✅ ' + data.message;
+                        setTimeout(() => {{
+                            location.reload();
+                        }}, 2000);
+                    }} else {{
+                        const error = await response.json();
+                        message.style.color = '#ef4444';
+                        message.innerHTML = '❌ ' + (error.detail || 'Erro ao iniciar importação');
+                        button.disabled = false;
+                        button.style.opacity = '1';
+                        button.style.cursor = 'pointer';
+                        button.innerHTML = '🚀 Iniciar Importação de 51M Registros';
+                    }}
+                }} catch (error) {{
+                    message.style.color = '#ef4444';
+                    message.innerHTML = '❌ Erro de conexão: ' + error.message;
+                    button.disabled = false;
+                    button.style.opacity = '1';
+                    button.style.cursor = 'pointer';
+                    button.innerHTML = '🚀 Iniciar Importação de 51M Registros';
+                }}
+            }}
 
             // Atualizar via API também
             async function updateProgress() {{
