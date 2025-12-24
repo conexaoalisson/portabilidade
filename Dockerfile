@@ -67,8 +67,11 @@ RUN mkdir -p /app/data /app/logs
 COPY start.sh /start.sh
 COPY auto_import.sh /app/auto_import.sh
 COPY generate_credentials.sh /app/generate_credentials.sh
+COPY import_historico_auto.sh /app/import_historico_auto.sh
+COPY import_chunks_smart.py /app/import_chunks_smart.py
+COPY monitor_import.py /app/monitor_import.py
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN chmod +x /start.sh /app/auto_import.sh /app/generate_credentials.sh
+RUN chmod +x /start.sh /app/auto_import.sh /app/generate_credentials.sh /app/import_historico_auto.sh
 
 # Expor portas
 EXPOSE 8000 5432 2222

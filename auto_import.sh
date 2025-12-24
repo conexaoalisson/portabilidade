@@ -261,6 +261,19 @@ printf "  %-24s ${GREEN}%'9d${NC}\n" "faixa_operadora" $FAIXA_COUNT
 echo -e "  ────────────────────────  ─────────"
 printf "  ${BOLD}%-24s %'9d${NC}\n" "TOTAL" $TOTAL_COUNT
 
+# ETAPA 6: Importação Histórica (51M registros)
+echo -e "\n${BOLD}6. IMPORTAÇÃO HISTÓRICA (51M REGISTROS)${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+
+# Verificar se script de importação histórica existe
+if [ -f "/app/import_historico_auto.sh" ]; then
+    # Executar importação histórica
+    /app/import_historico_auto.sh
+else
+    echo -e "${YELLOW}⚠ Script de importação histórica não encontrado${NC}"
+    echo -e "${BLUE}ℹ Para importar manualmente: /app/import_historico_auto.sh${NC}"
+fi
+
 # Parar PostgreSQL temporário se iniciamos
 if [ "$TEMP_PG" = "1" ]; then
     echo -e "\n${YELLOW}🔄 Finalizando PostgreSQL temporário...${NC}"
