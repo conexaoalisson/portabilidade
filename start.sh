@@ -54,10 +54,11 @@ su - postgres -c "psql -h localhost -p 5432 -c \"ALTER DATABASE ${POSTGRES_DB} O
 su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data stop" > /dev/null 2>&1
 sleep 2
 
-# Executar importação automática (output reduzido)
+# Executar importação automática com visualização completa
 if [ -f /app/auto_import.sh ]; then
-    log "Verificando dados..."
-    /app/auto_import.sh 2>&1 | grep -E "(✓|Importando|concluíd)" || true
+    echo ""
+    /app/auto_import.sh
+    echo ""
 fi
 
 # Exibir credenciais
