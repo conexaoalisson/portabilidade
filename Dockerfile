@@ -9,7 +9,8 @@ ENV POSTGRES_USER=portabilidade \
     POSTGRES_PASSWORD=portabilidade123 \
     POSTGRES_DB=portabilidade \
     PGDATA=/var/lib/postgresql/data \
-    TERM=xterm
+    TERM=xterm \
+    AUTO_IMPORT_HISTORICO=false
 
 # Instalar PostgreSQL, SSH e dependências
 RUN apt-get update && apt-get install -y \

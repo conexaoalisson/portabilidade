@@ -105,19 +105,35 @@ main() {
     echo -e "${YELLOW}⚠ Base histórica não encontrada${NC}"
     echo -e "${BLUE}ℹ Total esperado: 51.618.684 registros${NC}\n"
 
-    # Perguntar se deseja importar
-    if [ -t 0 ]; then
-        read -p "Deseja iniciar importação agora? [s/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Ss]$ ]]; then
-            echo -e "${YELLOW}⏭ Importação pulada${NC}"
+    # Verificar se deve importar automaticamente
+    if [ "${AUTO_IMPORT_HISTORICO}" = "true" ] || [ "${AUTO_IMPORT_HISTORICO}" = "1" ]; then
+        # Modo automático - iniciar importação direto
+        echo -e "${YELLOW}🚀 Iniciando importação automática...${NC}"
+        echo -e "${BLUE}ℹ Isso pode levar várias horas${NC}\n"
+
+        # Dar 5 segundos para cancelar se necessário
+        echo -e "${YELLOW}Iniciando em 5 segundos... (Ctrl+C para cancelar)${NC}"
+        for i in {5..1}; do
+            echo -ne "\r${YELLOW}Iniciando em $i segundos...${NC}"
+            sleep 1
+        done
+        echo -e "\n"
+    else
+        # Modo interativo - perguntar
+        if [ -t 0 ]; then
+            read -p "Deseja iniciar importação agora? [s/N] " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                echo -e "${YELLOW}⏭ Importação pulada${NC}"
+                echo -e "${BLUE}ℹ Para importar automaticamente, defina AUTO_IMPORT_HISTORICO=true${NC}"
+                return 0
+            fi
+        else
+            echo -e "${YELLOW}⏭ Modo não interativo - pulando importação${NC}"
+            echo -e "${BLUE}ℹ Para importar automaticamente, defina AUTO_IMPORT_HISTORICO=true${NC}"
+            echo -e "${BLUE}ℹ Para importar manualmente: /app/import_historico_auto.sh${NC}"
             return 0
         fi
-    else
-        # Se não for interativo, pular
-        echo -e "${YELLOW}⏭ Modo não interativo - pulando importação${NC}"
-        echo -e "${BLUE}ℹ Para importar, execute: /app/import_historico_auto.sh${NC}"
-        return 0
     fi
 
     # Download se necessário
