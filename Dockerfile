@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     openssh-server \
     curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurar PostgreSQL
@@ -62,8 +63,9 @@ RUN mkdir -p /app/data /app/logs
 
 # Copiar scripts de inicialização
 COPY start.sh /start.sh
+COPY auto_import.sh /app/auto_import.sh
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh /app/auto_import.sh
 
 # Expor portas
 EXPOSE 8000 5432 2222

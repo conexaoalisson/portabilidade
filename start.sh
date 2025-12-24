@@ -61,6 +61,13 @@ su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data s
 # Aguardar PostgreSQL parar completamente
 sleep 2
 
+# Executar importação automática se necessário
+if [ -f /app/auto_import.sh ]; then
+    echo ""
+    echo "Verificando e importando dados automaticamente..."
+    /app/auto_import.sh
+fi
+
 # Verificar serviços configurados
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║          SERVIÇOS CONFIGURADOS                            ║"
