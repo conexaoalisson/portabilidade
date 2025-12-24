@@ -4,11 +4,12 @@ FROM python:3.11-slim
 ENV TZ=America/Sao_Paulo
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Variáveis de ambiente PostgreSQL
+# Variáveis de ambiente
 ENV POSTGRES_USER=portabilidade \
     POSTGRES_PASSWORD=portabilidade123 \
     POSTGRES_DB=portabilidade \
-    PGDATA=/var/lib/postgresql/data
+    PGDATA=/var/lib/postgresql/data \
+    TERM=xterm
 
 # Instalar PostgreSQL, SSH e dependências
 RUN apt-get update && apt-get install -y \

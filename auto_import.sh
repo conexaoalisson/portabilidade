@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Definir TERM se não estiver definido
+export TERM=${TERM:-xterm}
+
 # Cores para output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -89,7 +92,10 @@ download_with_progress() {
 }
 
 # Banner inicial
-clear
+# Só limpar tela se estiver em ambiente interativo
+if [ -t 1 ]; then
+    clear
+fi
 echo -e "${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}║         IMPORTAÇÃO DE DADOS COM MONITORAMENTO              ║${NC}"
 echo -e "${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"

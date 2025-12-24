@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Definir TERM se não estiver definido
+export TERM=${TERM:-xterm}
+
 # Gerar ou carregar credenciais
 source /app/generate_credentials.sh
 
@@ -10,7 +13,10 @@ log() {
 }
 
 # Banner inicial
-clear
+# Só limpar tela se estiver em ambiente interativo
+if [ -t 1 ]; then
+    clear
+fi
 echo ""
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║         API PORTABILIDADE - INICIALIZANDO                  ║"
