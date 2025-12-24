@@ -64,23 +64,23 @@ class PortabilidadeHistorico(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     spid_origem = Column(String(10), index=True)  # Campo 1
-    flag_1 = Column(Integer)  # Campo 2
+    flag_1 = Column(BigInteger)  # Campo 2
     data_criacao = Column(String(50))  # Campo 3 - timestamp
     telefone = Column(BigInteger, index=True)  # Campo 4 - número completo
-    codigo_1 = Column(Integer)  # Campo 5
+    codigo_1 = Column(BigInteger)  # Campo 5
     spid_destino = Column(String(10))  # Campo 6
     codigo_operadora = Column(String(10))  # Campo 7
     codigo_completo = Column(String(10), index=True)  # Campo 8
-    flag_2 = Column(Integer)  # Campo 9
-    flag_3 = Column(Integer)  # Campo 10
+    flag_2 = Column(BigInteger)  # Campo 9
+    flag_3 = Column(BigInteger)  # Campo 10
     status = Column(String(20))  # Campo 11 - new/old/etc
-    flag_4 = Column(Integer)  # Campo 12
+    flag_4 = Column(BigInteger)  # Campo 12
     data_atualizacao = Column(String(50))  # Campo 13 - timestamp
-    flag_5 = Column(Integer)  # Campo 14
+    flag_5 = Column(BigInteger)  # Campo 14
     data_nula_1 = Column(String(50))  # Campo 15
-    flag_6 = Column(Integer)  # Campo 16
-    flag_7 = Column(Integer)  # Campo 17
-    flag_8 = Column(Integer)  # Campo 18
+    flag_6 = Column(BigInteger)  # Campo 16
+    flag_7 = Column(BigInteger)  # Campo 17
+    flag_8 = Column(BigInteger)  # Campo 18
     data_nula_2 = Column(String(50))  # Campo 19
 
     __table_args__ = (
