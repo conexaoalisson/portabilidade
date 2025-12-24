@@ -1,15 +1,11 @@
 #!/bin/bash
 set -e
 
-echo ""
-echo "╔════════════════════════════════════════════════════════════╗"
-echo "║        VERIFICAÇÃO E IMPORTAÇÃO AUTOMÁTICA                 ║"
-echo "╚════════════════════════════════════════════════════════════╝"
-echo ""
+# Carregar credenciais
+source /app/.credentials 2>/dev/null || true
 
 # Variáveis
 SQL_DIR="/app/sql_postgres"
-DATA_DIR="/app/data"
 BASE_URL="https://techsuper.com.br/baseportabilidade"
 DB_HOST="${POSTGRES_HOST:-localhost}"
 DB_PORT="${POSTGRES_PORT:-5432}"
@@ -17,16 +13,16 @@ DB_USER="${POSTGRES_USER}"
 DB_PASS="${POSTGRES_PASSWORD}"
 DB_NAME="${POSTGRES_DB}"
 
-# Função para executar comandos SQL
+# Função para executar comandos SQL silenciosamente
 exec_sql() {
-    PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$1" 2>&1
+    PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "$1" 2>/dev/null
 }
 
 # Função para verificar se tabela existe e tem dados
 check_table() {
     local table=$1
-    local result=$(exec_sql "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '$table') AND EXISTS (SELECT 1 FROM $table LIMIT 1);" | grep -E "(t|f)" | tr -d ' ')
-    if [ "$result" = "t" ]; then
+    local count=$(exec_sql "SELECT COUNT(*) FROM $table;" 2>/dev/null | tr -d ' ' || echo "0")
+    if [ "$count" -gt "0" ]; then
         return 0
     else
         return 1
@@ -39,167 +35,121 @@ download_if_missing() {
     local url=$2
 
     if [ ! -f "$SQL_DIR/$file" ]; then
-        echo "• Baixando $file..."
+        echo "  ✓ Baixando $file..."
         mkdir -p "$SQL_DIR"
-        wget -q --show-progress "$url" -O "$SQL_DIR/$file.gz"
-        gunzip "$SQL_DIR/$file.gz"
-        echo "  ✓ Download concluído"
-    else
-        echo "  ✓ Arquivo $file já existe"
+        wget -q "$url" -O "$SQL_DIR/$file.gz" 2>/dev/null
+        gunzip -q "$SQL_DIR/$file.gz" 2>/dev/null
     fi
 }
 
-# Iniciar PostgreSQL temporário se não estiver rodando
+# Iniciar PostgreSQL se necessário
 if ! pg_isready -h "$DB_HOST" -p "$DB_PORT" > /dev/null 2>&1; then
-    echo "Iniciando PostgreSQL temporário para importação..."
-    su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data start"
-
-    # Aguardar PostgreSQL estar pronto
+    su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data start" > /dev/null 2>&1
     until pg_isready -h "$DB_HOST" -p "$DB_PORT" > /dev/null 2>&1; do
-        sleep 1
+        sleep 0.5
     done
     TEMP_PG=1
 fi
 
-echo ""
-echo "1. Verificando estrutura do banco de dados..."
-
-# Criar tabelas usando SQLAlchemy/Alembic se não existirem
-if ! check_table "operadoras_rn1" && ! check_table "operadoras_stfc" && ! check_table "faixa_operadora"; then
-    echo "• Criando estrutura das tabelas..."
+# Criar tabelas se não existirem
+if ! exec_sql "SELECT 1 FROM information_schema.tables WHERE table_name = 'operadoras_rn1';" | grep -q 1 2>/dev/null; then
+    echo "  ✓ Criando estrutura do banco..."
     cd /app
     python3 -c "
 from app.database import engine, Base
 from app.models import FaixaOperadora, OperadoraRN1, OperadoraSTFC, PortabilidadeHistorico
-
-# Criar todas as tabelas
 Base.metadata.create_all(bind=engine)
-print('  ✓ Tabelas criadas com sucesso')
-"
-else
-    echo "  ✓ Estrutura do banco já existe"
+" 2>/dev/null
 fi
 
-echo ""
-echo "2. Verificando arquivos de dados..."
-
-# Baixar arquivos se não existirem
+# Baixar arquivos necessários
 download_if_missing "operadoras_rn1.sql" "${BASE_URL}/operadoras_rn1.sql.gz"
 download_if_missing "operadoras_stfc.sql" "${BASE_URL}/operadoras_stfc.sql.gz"
 download_if_missing "faixa_operadora.sql" "${BASE_URL}/faixa_operadora.sql.gz"
 
-echo ""
-echo "3. Verificando dados nas tabelas..."
-
 # Importar dados se necessário
+IMPORTED=0
+
 if ! check_table "operadoras_rn1"; then
-    echo "• Importando operadoras_rn1..."
+    echo "  ✓ Importando operadoras_rn1..."
 
-    # Criar estrutura da tabela temporária para o INSERT
-    exec_sql "CREATE TABLE IF NOT EXISTS operadoras_rn1 (
-        id SERIAL PRIMARY KEY,
-        nome_operadora VARCHAR(150),
-        cnpj VARCHAR(20),
-        rn1_prefixo VARCHAR(10) UNIQUE
-    );"
+    # Adicionar colunas faltantes se necessário
+    exec_sql "ALTER TABLE operadoras_rn1 ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;" || true
+    exec_sql "ALTER TABLE operadoras_rn1 ADD COLUMN IF NOT EXISTS nome_operadora VARCHAR(150);" || true
+    exec_sql "ALTER TABLE operadoras_rn1 ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20);" || true
+    exec_sql "ALTER TABLE operadoras_rn1 ADD COLUMN IF NOT EXISTS rn1_prefixo VARCHAR(10);" || true
 
-    # Importar dados
     PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_DIR/operadoras_rn1.sql" > /dev/null 2>&1
-
-    # Verificar quantidade importada
-    count=$(exec_sql "SELECT COUNT(*) FROM operadoras_rn1;" | grep -E "[0-9]+" | head -1 | tr -d ' ')
-    echo "  ✓ Importados $count registros em operadoras_rn1"
-else
-    echo "  ✓ operadoras_rn1 já contém dados"
+    IMPORTED=1
 fi
 
 if ! check_table "operadoras_stfc"; then
-    echo "• Importando operadoras_stfc..."
+    echo "  ✓ Importando operadoras_stfc..."
 
-    # Criar estrutura da tabela temporária para o INSERT
-    exec_sql "CREATE TABLE IF NOT EXISTS operadoras_stfc (
-        id SERIAL PRIMARY KEY,
-        eot VARCHAR(10),
-        nome_fantasia VARCHAR(150),
-        razao_social VARCHAR(200),
-        csp VARCHAR(10),
-        tipo_servico VARCHAR(50),
-        modalidade_banda VARCHAR(50),
-        area_prestacao VARCHAR(100),
-        holding VARCHAR(150),
-        cnpj VARCHAR(25),
-        inscricao_estadual VARCHAR(50),
-        contato VARCHAR(100),
-        email VARCHAR(150),
-        fone VARCHAR(100),
-        endereco_nf TEXT,
-        endereco_correspondencia TEXT,
-        uf VARCHAR(2),
-        regiao VARCHAR(10),
-        concessao VARCHAR(5),
-        rn1 VARCHAR(10),
-        spid VARCHAR(10)
-    );"
+    # Adicionar todas as colunas necessárias
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS eot VARCHAR(10);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS nome_fantasia VARCHAR(150);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS razao_social VARCHAR(200);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS csp VARCHAR(10);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS tipo_servico VARCHAR(50);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS modalidade_banda VARCHAR(50);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS area_prestacao VARCHAR(100);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS holding VARCHAR(150);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS cnpj VARCHAR(25);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS inscricao_estadual VARCHAR(50);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS contato VARCHAR(100);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS email VARCHAR(150);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS fone VARCHAR(100);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS endereco_nf TEXT;" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS endereco_correspondencia TEXT;" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS uf VARCHAR(2);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS regiao VARCHAR(10);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS concessao VARCHAR(5);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS rn1 VARCHAR(10);" || true
+    exec_sql "ALTER TABLE operadoras_stfc ADD COLUMN IF NOT EXISTS spid VARCHAR(10);" || true
 
-    # Importar dados
     PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_DIR/operadoras_stfc.sql" > /dev/null 2>&1
-
-    # Verificar quantidade importada
-    count=$(exec_sql "SELECT COUNT(*) FROM operadoras_stfc;" | grep -E "[0-9]+" | head -1 | tr -d ' ')
-    echo "  ✓ Importados $count registros em operadoras_stfc"
-else
-    echo "  ✓ operadoras_stfc já contém dados"
+    IMPORTED=1
 fi
 
 if ! check_table "faixa_operadora"; then
-    echo "• Importando faixa_operadora (pode demorar)..."
+    echo "  ✓ Importando faixa_operadora (aguarde)..."
 
-    # Criar estrutura da tabela temporária para o INSERT
-    exec_sql "CREATE TABLE IF NOT EXISTS faixa_operadora (
-        id SERIAL PRIMARY KEY,
-        nome_operadora VARCHAR(100),
-        tipo_numero VARCHAR(1),
-        ddi_ddd VARCHAR(10),
-        ddd VARCHAR(5),
-        prefixo VARCHAR(10),
-        faixa_inicio INTEGER,
-        faixa_fim INTEGER,
-        sigla_operadora VARCHAR(10),
-        estado VARCHAR(2),
-        codigo_regiao VARCHAR(10)
-    );"
+    # Adicionar colunas necessárias
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS nome_operadora VARCHAR(100);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS tipo_numero VARCHAR(1);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS ddi_ddd VARCHAR(10);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS ddd VARCHAR(5);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS prefixo VARCHAR(10);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS faixa_inicio INTEGER;" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS faixa_fim INTEGER;" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS sigla_operadora VARCHAR(10);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS estado VARCHAR(2);" || true
+    exec_sql "ALTER TABLE faixa_operadora ADD COLUMN IF NOT EXISTS codigo_regiao VARCHAR(10);" || true
 
-    # Importar dados
     PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$SQL_DIR/faixa_operadora.sql" > /dev/null 2>&1
-
-    # Verificar quantidade importada
-    count=$(exec_sql "SELECT COUNT(*) FROM faixa_operadora;" | grep -E "[0-9]+" | head -1 | tr -d ' ')
-    echo "  ✓ Importados $count registros em faixa_operadora"
-else
-    echo "  ✓ faixa_operadora já contém dados"
+    IMPORTED=1
 fi
 
-echo ""
-echo "4. Criando índices otimizados..."
-
-# Criar índices se não existirem
-exec_sql "CREATE INDEX IF NOT EXISTS idx_rn1_prefixo ON operadoras_rn1(rn1_prefixo);" > /dev/null 2>&1
-exec_sql "CREATE INDEX IF NOT EXISTS idx_stfc_spid ON operadoras_stfc(spid);" > /dev/null 2>&1
-exec_sql "CREATE INDEX IF NOT EXISTS idx_stfc_eot ON operadoras_stfc(eot);" > /dev/null 2>&1
-exec_sql "CREATE INDEX IF NOT EXISTS idx_faixa_ddd_prefixo ON faixa_operadora(ddd, prefixo);" > /dev/null 2>&1
-
-echo "  ✓ Índices verificados/criados"
+# Criar índices
+if [ "$IMPORTED" = "1" ]; then
+    echo "  ✓ Otimizando banco de dados..."
+    exec_sql "CREATE INDEX IF NOT EXISTS idx_rn1_prefixo ON operadoras_rn1(rn1_prefixo);" || true
+    exec_sql "CREATE INDEX IF NOT EXISTS idx_stfc_spid ON operadoras_stfc(spid);" || true
+    exec_sql "CREATE INDEX IF NOT EXISTS idx_stfc_eot ON operadoras_stfc(eot);" || true
+    exec_sql "CREATE INDEX IF NOT EXISTS idx_faixa_ddd_prefixo ON faixa_operadora(ddd, prefixo);" || true
+fi
 
 # Parar PostgreSQL temporário se iniciamos
 if [ "$TEMP_PG" = "1" ]; then
-    echo ""
-    echo "Parando PostgreSQL temporário..."
-    su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data stop"
+    su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data stop" > /dev/null 2>&1
     sleep 2
 fi
 
-echo ""
-echo "╔════════════════════════════════════════════════════════════╗"
-echo "║        IMPORTAÇÃO AUTOMÁTICA CONCLUÍDA                     ║"
-echo "╚════════════════════════════════════════════════════════════╝"
-echo ""
+if [ "$IMPORTED" = "1" ]; then
+    echo "  ✓ Importação concluída!"
+else
+    echo "  ✓ Dados já importados"
+fi
