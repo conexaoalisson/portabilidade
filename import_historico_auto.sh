@@ -12,10 +12,13 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Arquivo de entrada
-CSV_FILE="/tmp/export_full_mysql.csv"
+# Arquivo de entrada (diretório persistente)
+CSV_FILE="/app/data/export_full_mysql.csv"
 CSV_GZ="${CSV_FILE}.gz"
 CSV_URL="http://techsuper.com.br/baseportabilidade/export_full_mysql.csv.gz"
+
+# Criar diretório se não existir
+mkdir -p /app/data
 
 # Função de log com timestamp
 log() {

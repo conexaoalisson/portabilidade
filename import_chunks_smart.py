@@ -27,9 +27,9 @@ DB_CONFIG = {
     'password': os.getenv('POSTGRES_PASSWORD', 'portabilidade123')
 }
 
-INPUT_FILE = '/tmp/export_full_mysql.csv'
+INPUT_FILE = '/app/data/export_full_mysql.csv'
 CHUNK_SIZE = 1000000  # 1 milhão de linhas por chunk
-TEMP_DIR = '/tmp/portabilidade_chunks'
+TEMP_DIR = '/app/data/portabilidade_chunks'
 
 # Cores para output
 GREEN = '\033[0;32m'
@@ -52,17 +52,42 @@ def count_lines(filename):
     result = subprocess.run(['wc', '-l', filename], capture_output=True, text=True)
     return int(result.stdout.split()[0])
 
+def get_current_count():
+    """Obtém quantidade de registros já importados"""
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM portabilidade_historico")
+        count = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return count
+    except:
+        return 0
+
 def split_file_into_chunks(filename, chunk_size):
     """Divide arquivo em chunks menores"""
     os.makedirs(TEMP_DIR, exist_ok=True)
+    os.makedirs('/app/data', exist_ok=True)  # Garantir que diretório existe
 
     print(f"\n{BOLD}1. DIVIDINDO ARQUIVO EM CHUNKS{NC}")
     print(f"{YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{NC}")
 
+    # Verificar registros já importados
+    current_count = get_current_count()
+    skip_lines = current_count
+
+    if skip_lines > 0:
+        print(f"{GREEN}✓ Detectados {skip_lines:,} registros já importados{NC}")
+        print(f"{YELLOW}→ Pulando primeiras {skip_lines:,} linhas{NC}\n")
+
     total_lines = count_lines(filename)
-    total_chunks = (total_lines // chunk_size) + (1 if total_lines % chunk_size else 0)
+    remaining_lines = total_lines - skip_lines
+    total_chunks = (remaining_lines // chunk_size) + (1 if remaining_lines % chunk_size else 0)
 
     print(f"Total de linhas: {total_lines:,}")
+    print(f"Linhas já processadas: {skip_lines:,}")
+    print(f"Linhas restantes: {remaining_lines:,}")
     print(f"Linhas por chunk: {chunk_size:,}")
     print(f"Total de chunks: {total_chunks}\n")
 
@@ -73,7 +98,11 @@ def split_file_into_chunks(filename, chunk_size):
     chunk_writer = None
 
     with open(filename, 'r', encoding='utf-8') as infile:
-        for line_num, line in enumerate(infile, 1):
+        # Pular linhas já processadas
+        for _ in range(skip_lines):
+            next(infile)
+
+        for line_num, line in enumerate(infile, skip_lines + 1):
             # Novo chunk
             if current_lines == 0:
                 if chunk_file:
