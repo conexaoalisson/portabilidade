@@ -75,7 +75,7 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 RUN chmod +x /start.sh /app/auto_import.sh /app/generate_credentials.sh /app/import_historico_auto.sh
 
 # Expor portas
-EXPOSE 8000 5432 2222
+EXPOSE 80 5432 2222
 
 # Comando de inicialização
 CMD ["/start.sh"]

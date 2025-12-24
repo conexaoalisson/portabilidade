@@ -5,6 +5,7 @@ Importador inteligente de histórico de portabilidade
 - Usa COPY para velocidade máxima
 - Fallback para INSERT linha por linha em caso de erro
 - Progresso visual em tempo real
+- Otimizado para liberar memória após cada chunk
 """
 import os
 import sys
@@ -15,6 +16,7 @@ from datetime import datetime
 import tempfile
 import subprocess
 from io import StringIO
+import gc  # Garbage collector para liberar memória
 
 # Configurações
 DB_CONFIG = {
@@ -189,6 +191,11 @@ def import_chunk_with_copy(conn, chunk_file, chunk_num, total_chunks):
 
         rows_inserted = cursor.rowcount
         conn.commit()
+
+        # Limpar staging após inserção
+        cursor.execute("TRUNCATE staging_portabilidade")
+        conn.commit()
+
         print(f"\r{GREEN}✓ COPY bem-sucedido: {rows_inserted:,} registros{NC}")
         return True, rows_inserted, 0
 
@@ -310,13 +317,26 @@ def import_all_chunks(chunk_files):
         total_success += imported
         total_errors += errors
 
+        # Limpar arquivo do chunk após processamento
+        os.remove(chunk_file)
+
+        # Forçar limpeza de memória
+        gc.collect()
+
+        # Executar VACUUM ANALYZE a cada 10 chunks para otimizar banco
+        if i % 10 == 0:
+            print(f"\n{YELLOW}Otimizando banco de dados...{NC}")
+            cursor = conn.cursor()
+            cursor.execute("VACUUM ANALYZE portabilidade_historico")
+            conn.commit()
+            cursor.close()
+
     conn.close()
 
-    # Limpar chunks temporários
-    print(f"\n{YELLOW}Limpando arquivos temporários...{NC}")
-    for chunk_file in chunk_files:
-        os.remove(chunk_file)
-    os.rmdir(TEMP_DIR)
+    # Limpar diretório temporário
+    print(f"\n{YELLOW}Limpando diretório temporário...{NC}")
+    if os.path.exists(TEMP_DIR):
+        os.rmdir(TEMP_DIR)
 
     return total_success, total_errors
 

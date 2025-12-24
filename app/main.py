@@ -1,14 +1,18 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
 import subprocess
 import sys
+import psutil
+import json
+from datetime import datetime
 from sqlalchemy import text
 
 from app.database import SessionLocal, engine
-from app.models import Base, FaixaOperadora, OperadoraRN1, OperadoraSTFC
+from app.models import Base, FaixaOperadora, OperadoraRN1, OperadoraSTFC, PortabilidadeHistorico
 
 app = FastAPI(
     title="API Portabilidade",
@@ -74,6 +78,9 @@ async def root():
             "stats": "GET /stats - Estatísticas da base",
             "import": "POST /import - Importar base de dados",
             "import_status": "GET /import/status - Status da importação",
+            "import_historico": "POST /import/historico - Importar 51M registros históricos",
+            "import_historico_status": "GET /import/historico/status - Status importação histórica",
+            "import_historico_progress": "GET /import/historico/progress - Página web com progresso",
             "reboot": "POST /reboot - Reiniciar sistema (requer confirmação)"
         }
     }
@@ -109,7 +116,7 @@ async def health():
         "tables_count": db_tables_count,
         "ssh": "enabled",
         "ssh_port": 2222,
-        "api_port": 8000
+        "api_port": 80
     }
 
 @app.get("/stats", response_model=StatsResponse)
@@ -272,7 +279,7 @@ async def info():
         "postgres_port": 5432,
         "ssh_enabled": True,
         "ssh_port": 2222,
-        "api_port": 8000,
+        "api_port": 80,
         "base_url": "https://techsuper.com.br/baseportabilidade/"
     }
 
@@ -335,6 +342,296 @@ async def reboot_system(request: RebootRequest, background_tasks: BackgroundTask
         "warning": "A API ficará offline durante o reinício"
     }
 
+# Importação Histórica (51M registros)
+def get_historico_status() -> Dict[str, Any]:
+    """Obtém status da importação histórica"""
+    try:
+        session = SessionLocal()
+
+        # Contar registros
+        count_result = session.execute(text("SELECT COUNT(*) FROM portabilidade_historico"))
+        current_count = count_result.fetchone()[0]
+
+        # Verificar se processo está rodando
+        import_running = False
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if 'import_chunks_smart.py' in cmdline or 'import_historico_auto.sh' in cmdline:
+                    import_running = True
+                    break
+            except:
+                pass
+
+        # Verificar arquivo de chunks
+        chunks_info = {}
+        temp_dir = '/tmp/portabilidade_chunks'
+        if os.path.exists(temp_dir):
+            chunks = [f for f in os.listdir(temp_dir) if f.endswith('.csv')]
+            chunks_info = {
+                'total_chunks': len(chunks),
+                'current_chunk': len(chunks) - len([f for f in chunks if os.path.exists(os.path.join(temp_dir, f))])
+            }
+
+        session.close()
+
+        # Calcular progresso
+        TOTAL_EXPECTED = 51618684
+        progress = (current_count / TOTAL_EXPECTED) * 100 if TOTAL_EXPECTED > 0 else 0
+
+        return {
+            'running': import_running,
+            'current_records': current_count,
+            'total_expected': TOTAL_EXPECTED,
+            'progress_percent': round(progress, 2),
+            'chunks_info': chunks_info,
+            'completed': current_count >= TOTAL_EXPECTED
+        }
+
+    except Exception as e:
+        return {
+            'error': str(e),
+            'running': False,
+            'current_records': 0,
+            'progress_percent': 0
+        }
+
+@app.post("/import/historico")
+async def import_historico(background_tasks: BackgroundTasks):
+    """
+    Inicia importação dos 51M registros históricos
+    """
+    status = get_historico_status()
+
+    if status.get('running'):
+        raise HTTPException(status_code=409, detail="Importação histórica já está em execução")
+
+    if status.get('completed'):
+        raise HTTPException(status_code=400, detail="Importação histórica já foi concluída")
+
+    # Executar em background
+    def run_import():
+        subprocess.run(["/app/import_historico_auto.sh"],
+                      env={**os.environ, 'AUTO_IMPORT_HISTORICO': 'true'})
+
+    background_tasks.add_task(run_import)
+
+    return {
+        "status": "started",
+        "message": "Importação histórica iniciada em background",
+        "total_records": 51618684,
+        "monitor_url": "/import/historico/progress"
+    }
+
+@app.get("/import/historico/status")
+async def import_historico_status():
+    """Retorna status da importação histórica em JSON"""
+    return get_historico_status()
+
+@app.get("/import/historico/progress", response_class=HTMLResponse)
+async def import_historico_progress():
+    """Página web com progresso visual da importação"""
+    status = get_historico_status()
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Progresso da Importação - Portabilidade</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background-color: #0f172a;
+                color: #e2e8f0;
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+            }}
+            .container {{
+                background-color: #1e293b;
+                border-radius: 16px;
+                padding: 32px;
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                max-width: 600px;
+                width: 100%;
+            }}
+            h1 {{
+                margin: 0 0 8px 0;
+                font-size: 28px;
+                color: #f8fafc;
+                text-align: center;
+            }}
+            .subtitle {{
+                text-align: center;
+                color: #94a3b8;
+                margin-bottom: 32px;
+                font-size: 14px;
+            }}
+            .progress-container {{
+                background-color: #334155;
+                border-radius: 12px;
+                height: 32px;
+                overflow: hidden;
+                margin-bottom: 24px;
+                position: relative;
+            }}
+            .progress-bar {{
+                height: 100%;
+                background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
+                border-radius: 12px;
+                transition: width 0.5s ease;
+                position: relative;
+                overflow: hidden;
+            }}
+            .progress-bar::after {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                right: 0;
+                background: linear-gradient(
+                    45deg,
+                    transparent 25%,
+                    rgba(255, 255, 255, 0.1) 25%,
+                    rgba(255, 255, 255, 0.1) 50%,
+                    transparent 50%,
+                    transparent 75%,
+                    rgba(255, 255, 255, 0.1) 75%,
+                    rgba(255, 255, 255, 0.1)
+                );
+                background-size: 50px 50px;
+                animation: progress-bar-stripes 1s linear infinite;
+            }}
+            @keyframes progress-bar-stripes {{
+                0% {{ background-position: 0 0; }}
+                100% {{ background-position: 50px 50px; }}
+            }}
+            .stats {{
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 16px;
+                margin-bottom: 24px;
+            }}
+            .stat {{
+                background-color: #334155;
+                padding: 16px;
+                border-radius: 8px;
+                text-align: center;
+            }}
+            .stat-value {{
+                font-size: 24px;
+                font-weight: bold;
+                color: #3b82f6;
+                margin-bottom: 4px;
+            }}
+            .stat-label {{
+                font-size: 12px;
+                color: #94a3b8;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }}
+            .status {{
+                text-align: center;
+                padding: 12px;
+                border-radius: 8px;
+                font-weight: 500;
+                margin-bottom: 16px;
+            }}
+            .status.running {{
+                background-color: rgba(34, 197, 94, 0.1);
+                color: #22c55e;
+                border: 1px solid rgba(34, 197, 94, 0.2);
+            }}
+            .status.completed {{
+                background-color: rgba(59, 130, 246, 0.1);
+                color: #3b82f6;
+                border: 1px solid rgba(59, 130, 246, 0.2);
+            }}
+            .status.stopped {{
+                background-color: rgba(239, 68, 68, 0.1);
+                color: #ef4444;
+                border: 1px solid rgba(239, 68, 68, 0.2);
+            }}
+            .refresh-info {{
+                text-align: center;
+                color: #64748b;
+                font-size: 12px;
+                margin-top: 16px;
+            }}
+            .progress-text {{
+                position: absolute;
+                width: 100%;
+                text-align: center;
+                line-height: 32px;
+                color: #f8fafc;
+                font-weight: 500;
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+                z-index: 1;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Importação de Histórico</h1>
+            <div class="subtitle">51.618.684 registros de portabilidade</div>
+
+            <div class="status {'running' if status['running'] else 'completed' if status['completed'] else 'stopped'}">
+                {'🔄 Importação em andamento...' if status['running'] else '✅ Importação concluída!' if status['completed'] else '⏸️ Importação pausada'}
+            </div>
+
+            <div class="progress-container">
+                <div class="progress-bar" style="width: {status['progress_percent']}%">
+                    <div class="progress-text">{status['progress_percent']:.1f}%</div>
+                </div>
+            </div>
+
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value">{status['current_records']:,}</div>
+                    <div class="stat-label">Registros Importados</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">{status['total_expected']:,}</div>
+                    <div class="stat-label">Total Esperado</div>
+                </div>
+            </div>
+
+            <div class="refresh-info">
+                Página atualiza automaticamente a cada 5 segundos
+            </div>
+        </div>
+
+        <script>
+            // Auto-refresh a cada 5 segundos
+            setTimeout(() => {{
+                location.reload();
+            }}, 5000);
+
+            // Atualizar via API também
+            async function updateProgress() {{
+                try {{
+                    const response = await fetch('/import/historico/status');
+                    const data = await response.json();
+
+                    // Atualizar elementos se necessário
+                    // (implementação futura com atualização sem reload)
+                }} catch (error) {{
+                    console.error('Erro ao atualizar:', error);
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(content=html_content)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=80)
