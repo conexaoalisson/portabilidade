@@ -82,6 +82,7 @@ async def root():
             "import_historico": "POST /import/historico - Importar 51M registros históricos",
             "import_historico_status": "GET /import/historico/status - Status importação histórica",
             "import_historico_progress": "GET /import/historico/progress - Página web com progresso",
+            "import_historico_reset": "DELETE /import/historico/reset - Resetar importação (limpar tudo)",
             "reboot": "POST /reboot - Reiniciar sistema (requer confirmação)"
         }
     }
@@ -490,6 +491,63 @@ async def import_historico(background_tasks: BackgroundTasks):
         "monitor_url": "/import/historico/progress"
     }
 
+@app.delete("/import/historico/reset")
+async def reset_import_historico():
+    """
+    Reseta a importação histórica (limpa tabela e arquivos)
+    """
+    try:
+        session = SessionLocal()
+
+        # Verificar se tem processo rodando
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if 'import_chunks' in cmdline or 'import_historico' in cmdline or 'import_low_memory' in cmdline or 'import_line_by_line' in cmdline:
+                    proc.terminate()  # Terminar processo
+            except:
+                pass
+
+        # Limpar tabela
+        session.execute(text("TRUNCATE TABLE portabilidade_historico"))
+        session.execute(text("DROP TABLE IF EXISTS import_stats"))
+        session.commit()
+
+        # Limpar arquivos
+        import shutil
+
+        # Remover chunks
+        if os.path.exists('/tmp/portabilidade_chunks'):
+            shutil.rmtree('/tmp/portabilidade_chunks')
+
+        if os.path.exists('/app/data/portabilidade_chunks'):
+            shutil.rmtree('/app/data/portabilidade_chunks')
+
+        # Remover CSV
+        for csv_path in ['/tmp/export_full_mysql.csv', '/app/data/export_full_mysql.csv']:
+            if os.path.exists(csv_path):
+                os.remove(csv_path)
+
+            gz_path = csv_path + '.gz'
+            if os.path.exists(gz_path):
+                os.remove(gz_path)
+
+        session.close()
+
+        return {
+            "status": "success",
+            "message": "Importação resetada com sucesso",
+            "actions": [
+                "Tabela portabilidade_historico limpa",
+                "Arquivos CSV removidos",
+                "Chunks temporários removidos",
+                "Processos de importação terminados"
+            ]
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao resetar: {str(e)}")
+
 @app.get("/import/historico/status")
 async def import_historico_status():
     """Retorna status da importação histórica em JSON"""
@@ -701,6 +759,27 @@ async def import_historico_progress():
                 <div id="message" style="margin-top: 16px; text-align: center; font-size: 14px;"></div>
             </div>
             ''' if not status['running'] and not status['completed'] else ''}
+
+            {f'''
+            <div style="margin-top: 24px;">
+                <button id="resetImport" onclick="resetImport()" style="
+                    width: 100%;
+                    padding: 16px;
+                    background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                    🔄 Resetar Importação (Limpar Tudo)
+                </button>
+                <div id="resetMessage" style="margin-top: 16px; text-align: center; font-size: 14px;"></div>
+            </div>
+            ''' if not status['running'] else ''}
         </div>
 
         <script>
@@ -750,6 +829,54 @@ async def import_historico_progress():
                     button.style.opacity = '1';
                     button.style.cursor = 'pointer';
                     button.innerHTML = '🚀 Iniciar Importação de 51M Registros';
+                }}
+            }}
+
+            // Função para resetar importação
+            async function resetImport() {{
+                const button = document.getElementById('resetImport');
+                const message = document.getElementById('resetMessage');
+
+                if (!confirm('⚠️ ATENÇÃO: Isso vai APAGAR todos os 10M+ registros importados e remover os arquivos.\\n\\nTem certeza que deseja resetar tudo?')) {{
+                    return;
+                }}
+
+                button.disabled = true;
+                button.style.opacity = '0.6';
+                button.style.cursor = 'not-allowed';
+                button.innerHTML = '⏳ Resetando...';
+
+                try {{
+                    const response = await fetch('/import/historico/reset', {{
+                        method: 'DELETE',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }}
+                    }});
+
+                    if (response.ok) {{
+                        const data = await response.json();
+                        message.style.color = '#22c55e';
+                        message.innerHTML = '✅ ' + data.message + '<br><small>' + data.actions.join('<br>') + '</small>';
+                        setTimeout(() => {{
+                            location.reload();
+                        }}, 3000);
+                    }} else {{
+                        const error = await response.json();
+                        message.style.color = '#ef4444';
+                        message.innerHTML = '❌ ' + (error.detail || 'Erro ao resetar');
+                        button.disabled = false;
+                        button.style.opacity = '1';
+                        button.style.cursor = 'pointer';
+                        button.innerHTML = '🔄 Resetar Importação (Limpar Tudo)';
+                    }}
+                }} catch (error) {{
+                    message.style.color = '#ef4444';
+                    message.innerHTML = '❌ Erro de conexão: ' + error.message;
+                    button.disabled = false;
+                    button.style.opacity = '1';
+                    button.style.cursor = 'pointer';
+                    button.innerHTML = '🔄 Resetar Importação (Limpar Tudo)';
                 }}
             }}
 
