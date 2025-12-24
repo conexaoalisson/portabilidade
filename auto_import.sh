@@ -15,6 +15,31 @@ BOLD='\033[1m'
 # Carregar credenciais
 source /app/.credentials 2>/dev/null || true
 
+# Função para limpar arquivos corrompidos
+cleanup_corrupted_files() {
+    echo -e "${YELLOW}🧹 Verificando arquivos corrompidos...${NC}"
+
+    for file in "$SQL_DIR"/*.sql.gz; do
+        if [ -f "$file" ]; then
+            if ! gzip -t "$file" 2>/dev/null; then
+                echo -e "${RED}✗ Removendo arquivo corrompido: $(basename "$file")${NC}"
+                rm -f "$file"
+            fi
+        fi
+    done
+
+    # Remover arquivos SQL parcialmente descompactados
+    for file in "$SQL_DIR"/*.sql; do
+        if [ -f "$file" ]; then
+            # Verificar se o arquivo tem pelo menos conteúdo válido
+            if ! grep -q "INSERT INTO\|CREATE TABLE" "$file" 2>/dev/null || [ ! -s "$file" ]; then
+                echo -e "${RED}✗ Removendo arquivo SQL inválido: $(basename "$file")${NC}"
+                rm -f "$file"
+            fi
+        fi
+    done
+}
+
 # Variáveis
 SQL_DIR="/app/sql_postgres"
 BASE_URL="https://techsuper.com.br/baseportabilidade"
@@ -68,27 +93,58 @@ count_sql_lines() {
     grep -c "INSERT INTO\|VALUES" "$file" 2>/dev/null || echo "0"
 }
 
-# Função para baixar com progresso
+# Função para baixar com progresso e verificação
 download_with_progress() {
     local file=$1
     local url=$2
+    local max_retries=3
+    local retry=0
 
-    echo -e "${YELLOW}📥 Baixando $file...${NC}"
-    mkdir -p "$SQL_DIR"
+    while [ $retry -lt $max_retries ]; do
+        echo -e "${YELLOW}📥 Baixando $file... (Tentativa $((retry+1))/$max_retries)${NC}"
+        mkdir -p "$SQL_DIR"
 
-    # Download com wget mostrando progresso
-    wget --progress=bar:force:noscroll "$url" -O "$SQL_DIR/$file.gz" 2>&1 | \
-        grep --line-buffered "%" | \
-        sed -u -e "s/.* \([0-9]\+\)%.*/\1/" | \
-        while read percent; do
-            draw_progress_bar $percent 100
-        done
+        # Limpar arquivo anterior se existir
+        rm -f "$SQL_DIR/$file.gz" "$SQL_DIR/$file"
 
-    echo -e "\n${GREEN}✓ Download concluído${NC}"
+        # Download com wget mostrando progresso (timeout de 5 minutos)
+        if wget --timeout=300 --tries=1 --progress=bar:force:noscroll "$url" -O "$SQL_DIR/$file.gz" 2>&1 | \
+            grep --line-buffered "%" | \
+            sed -u -e "s/.* \([0-9]\+\)%.*/\1/" | \
+            while read percent; do
+                draw_progress_bar $percent 100
+            done; then
 
-    echo -e "${YELLOW}📦 Descompactando...${NC}"
-    gunzip -f "$SQL_DIR/$file.gz"
-    echo -e "${GREEN}✓ Arquivo pronto${NC}\n"
+            echo -e "\n${GREEN}✓ Download concluído${NC}"
+
+            # Verificar integridade do arquivo gz
+            echo -e "${YELLOW}🔍 Verificando integridade...${NC}"
+            if gzip -t "$SQL_DIR/$file.gz" 2>/dev/null; then
+                echo -e "${GREEN}✓ Arquivo íntegro${NC}"
+
+                echo -e "${YELLOW}📦 Descompactando...${NC}"
+                if gunzip -f "$SQL_DIR/$file.gz"; then
+                    echo -e "${GREEN}✓ Arquivo pronto${NC}\n"
+                    return 0
+                else
+                    echo -e "${RED}✗ Erro ao descompactar${NC}"
+                fi
+            else
+                echo -e "${RED}✗ Arquivo corrompido, tentando novamente...${NC}"
+            fi
+        else
+            echo -e "${RED}✗ Erro no download${NC}"
+        fi
+
+        retry=$((retry + 1))
+        if [ $retry -lt $max_retries ]; then
+            echo -e "${YELLOW}⏳ Aguardando 5 segundos antes de tentar novamente...${NC}\n"
+            sleep 5
+        fi
+    done
+
+    echo -e "${RED}❌ Falha ao baixar $file após $max_retries tentativas${NC}"
+    return 1
 }
 
 # Banner inicial
@@ -158,6 +214,10 @@ fi
 echo -e "\n${BOLD}2. DOWNLOAD DOS ARQUIVOS DE DADOS${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
+# Limpar arquivos corrompidos antes de verificar
+cleanup_corrupted_files
+echo ""
+
 FILES_TO_DOWNLOAD=()
 
 if [ ! -f "$SQL_DIR/operadoras_rn1.sql" ]; then
@@ -175,9 +235,25 @@ fi
 if [ ${#FILES_TO_DOWNLOAD[@]} -eq 0 ]; then
     echo -e "${GREEN}✓ Todos os arquivos já existem${NC}"
 else
+    DOWNLOAD_FAILED=0
     for file in "${FILES_TO_DOWNLOAD[@]}"; do
-        download_with_progress "$file" "${BASE_URL}/${file}.gz"
+        if ! download_with_progress "$file" "${BASE_URL}/${file}.gz"; then
+            DOWNLOAD_FAILED=1
+            echo -e "${RED}❌ Falha ao baixar $file${NC}"
+        fi
     done
+
+    if [ $DOWNLOAD_FAILED -eq 1 ]; then
+        echo -e "\n${RED}❌ ERRO: Alguns arquivos não puderam ser baixados${NC}"
+        echo -e "${YELLOW}Por favor, verifique sua conexão e tente novamente${NC}"
+
+        # Parar PostgreSQL se iniciamos
+        if [ "$TEMP_PG" = "1" ]; then
+            su - postgres -c "/usr/lib/postgresql/*/bin/pg_ctl -D /var/lib/postgresql/data stop" > /dev/null 2>&1
+        fi
+
+        exit 1
+    fi
 fi
 
 # ETAPA 3: Importação dos Dados
