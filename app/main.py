@@ -83,6 +83,7 @@ async def root():
             "import_historico_status": "GET /import/historico/status - Status importação histórica",
             "import_historico_progress": "GET /import/historico/progress - Página web com progresso",
             "import_historico_reset": "DELETE /import/historico/reset - Resetar importação (limpar tudo)",
+            "import_historico_reset_page": "GET /import/historico/reset-page - Página dedicada para reset",
             "reboot": "POST /reboot - Reiniciar sistema (requer confirmação)"
         }
     }
@@ -553,6 +554,182 @@ async def import_historico_status():
     """Retorna status da importação histórica em JSON"""
     return get_historico_status()
 
+@app.get("/import/historico/reset-page", response_class=HTMLResponse)
+async def import_historico_reset_page():
+    """Página dedicada para reset da importação"""
+    status = get_historico_status()
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Reset Importação - Portabilidade</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background-color: #0f172a;
+                color: #e2e8f0;
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+            }}
+            .container {{
+                background-color: #1e293b;
+                border-radius: 16px;
+                padding: 32px;
+                max-width: 500px;
+                width: 100%;
+                border: 2px solid rgba(239, 68, 68, 0.3);
+            }}
+            h1 {{
+                color: #ef4444;
+                text-align: center;
+                margin: 0 0 24px 0;
+                font-size: 32px;
+            }}
+            .warning-box {{
+                background-color: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                border-radius: 8px;
+                padding: 16px;
+                margin-bottom: 24px;
+            }}
+            .stats {{
+                background-color: #334155;
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 24px;
+            }}
+            .stat-item {{
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 12px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid #475569;
+            }}
+            .stat-item:last-child {{
+                margin-bottom: 0;
+                padding-bottom: 0;
+                border-bottom: none;
+            }}
+            .reset-button {{
+                width: 100%;
+                padding: 20px;
+                background: #dc2626;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 18px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }}
+            .reset-button:hover {{
+                background: #b91c1c;
+                transform: scale(1.02);
+            }}
+            .back-link {{
+                display: block;
+                text-align: center;
+                margin-top: 24px;
+                color: #60a5fa;
+                text-decoration: none;
+            }}
+            .back-link:hover {{
+                text-decoration: underline;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🗑️ Reset Total da Importação</h1>
+
+            <div class="warning-box">
+                <h3 style="color: #f87171; margin-top: 0;">⚠️ ATENÇÃO - AÇÃO IRREVERSÍVEL</h3>
+                <p style="color: #fca5a5; margin: 0;">
+                    Esta ação irá APAGAR permanentemente todos os dados importados e arquivos.
+                    Não há como desfazer esta operação!
+                </p>
+            </div>
+
+            <div class="stats">
+                <h3 style="margin-top: 0; color: #f8fafc;">O que será apagado:</h3>
+                <div class="stat-item">
+                    <span>Registros no banco:</span>
+                    <strong style="color: #ef4444;">{status['current_records']:,}</strong>
+                </div>
+                <div class="stat-item">
+                    <span>Arquivos CSV:</span>
+                    <strong style="color: #ef4444;">Todos</strong>
+                </div>
+                <div class="stat-item">
+                    <span>Chunks temporários:</span>
+                    <strong style="color: #ef4444;">Todos</strong>
+                </div>
+                <div class="stat-item">
+                    <span>Processos em execução:</span>
+                    <strong style="color: #ef4444;">Serão parados</strong>
+                </div>
+            </div>
+
+            <button class="reset-button" onclick="confirmarReset()">
+                CONFIRMAR RESET TOTAL
+            </button>
+
+            <div id="message" style="margin-top: 16px; text-align: center;"></div>
+
+            <a href="/import/historico/progress" class="back-link">
+                ← Voltar para página de progresso
+            </a>
+        </div>
+
+        <script>
+            function confirmarReset() {{
+                if (!confirm('Última confirmação:\\n\\nTem ABSOLUTA CERTEZA que deseja apagar {status['current_records']:,} registros e todos os arquivos?\\n\\nEsta ação NÃO pode ser desfeita!')) {{
+                    return;
+                }}
+
+                const button = document.querySelector('.reset-button');
+                const message = document.getElementById('message');
+
+                button.disabled = true;
+                button.innerHTML = '⏳ EXECUTANDO RESET...';
+
+                fetch('/import/historico/reset', {{
+                    method: 'DELETE'
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (data.status === 'success') {{
+                        message.innerHTML = '<div style="color: #22c55e; font-weight: bold;">✅ ' + data.message + '</div>';
+                        button.innerHTML = '✓ RESET CONCLUÍDO';
+                        setTimeout(() => {{
+                            window.location.href = '/import/historico/progress';
+                        }}, 3000);
+                    }} else {{
+                        throw new Error(data.detail || 'Erro ao resetar');
+                    }}
+                }})
+                .catch(error => {{
+                    message.innerHTML = '<div style="color: #ef4444;">❌ ' + error.message + '</div>';
+                    button.disabled = false;
+                    button.innerHTML = 'CONFIRMAR RESET TOTAL';
+                }});
+            }}
+        </script>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(content=html_content)
+
 @app.get("/import/historico/progress", response_class=HTMLResponse)
 async def import_historico_progress():
     """Página web com progresso visual da importação"""
@@ -739,6 +916,21 @@ async def import_historico_progress():
                 Página atualiza automaticamente a cada 5 segundos
             </div>
 
+            <div style="text-align: center; margin-top: 20px;">
+                <a href="/import/historico/reset-page" style="
+                    color: #ef4444;
+                    text-decoration: none;
+                    font-size: 14px;
+                    padding: 8px 16px;
+                    border: 1px solid #ef4444;
+                    border-radius: 6px;
+                    display: inline-block;
+                    transition: all 0.3s ease;
+                " onmouseover="this.style.backgroundColor='rgba(239,68,68,0.1)'" onmouseout="this.style.backgroundColor='transparent'">
+                    🗑️ Ir para página de Reset
+                </a>
+            </div>
+
             {f'''
             <div style="margin-top: 24px;">
                 <button id="startImport" onclick="startImport()" style="
@@ -760,27 +952,63 @@ async def import_historico_progress():
             </div>
             ''' if not status['running'] and not status['completed'] else ''}
 
-            {f'''
-            <div style="margin-top: 24px;">
-                <button id="resetImport" onclick="resetImport()" style="
-                    width: 100%;
-                    padding: 16px;
-                    background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 16px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                    🔄 Resetar Importação (Limpar Tudo)
-                </button>
-                <div id="resetMessage" style="margin-top: 16px; text-align: center; font-size: 14px;"></div>
-            </div>
-            ''' if not status['running'] else ''}
         </div>
+
+        {f'''
+        <!-- SEÇÃO DE RESET SEPARADA -->
+        <div style="
+            margin-top: 40px;
+            padding: 24px;
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 2px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+        ">
+            <h2 style="
+                color: #ef4444;
+                margin: 0 0 12px 0;
+                font-size: 20px;
+                text-align: center;
+            ">⚠️ Zona de Perigo</h2>
+
+            <p style="
+                color: #f87171;
+                text-align: center;
+                margin-bottom: 20px;
+                font-size: 14px;
+            ">
+                Esta ação é irreversível e apagará TODOS os dados
+            </p>
+
+            <button id="resetImport" onclick="resetImport()" style="
+                width: 100%;
+                padding: 16px;
+                background: #dc2626;
+                color: white;
+                border: 2px solid #b91c1c;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            " onmouseover="this.style.background='#b91c1c'" onmouseout="this.style.background='#dc2626'">
+                🗑️ RESETAR TUDO E COMEÇAR DO ZERO
+            </button>
+
+            <div id="resetMessage" style="margin-top: 16px; text-align: center; font-size: 14px;"></div>
+
+            <ul style="
+                color: #fca5a5;
+                font-size: 12px;
+                margin-top: 16px;
+                padding-left: 20px;
+            ">
+                <li>Apaga {status['current_records']:,} registros do banco</li>
+                <li>Remove todos os arquivos CSV</li>
+                <li>Deleta todos os chunks temporários</li>
+                <li>Para processos em execução</li>
+            </ul>
+        </div>
+        ''' if not status['running'] else ''}
 
         <script>
             // Auto-refresh a cada 5 segundos
